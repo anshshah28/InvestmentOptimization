@@ -1,0 +1,121 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import pandas_datareader.data as web
+from lxml import html
+import requests
+
+# Getting Risk Free Rate
+riskFreeRateURL = "https://ycharts.com/indicators/1_month_treasury_rate"
+riskFreeRatePage = requests.get(riskFreeRateURL)
+riskFreeRateTree = html.fromstring(riskFreeRatePage.content)
+riskFreeRatexPath = riskFreeRateTree.xpath("//*[@id='pgNameVal']/text()")
+
+# Grabs the text from the xPath and converts it from LXML element into a string
+riskFreeRate = str(riskFreeRatexPath[0])
+
+# We get the percentage value from the whole string
+riskFreeRate = riskFreeRate[0:4]
+
+# Convert from string to a float and divide by 100 to get the value as a decimal
+riskFreeRate = (float(riskFreeRate)) / 100
+
+# Automates getting stocks
+stocks = []
+s = 0
+portfolioSize = input("How many different items are in the portfolio?: ")
+portfolioSize = int(portfolioSize)
+
+while s < portfolioSize:
+    s += 1
+    stock = input("Enter stock ticker: ")
+    if stock == "":
+        break
+    stocks.append(stock)
+
+# Initializes portfolio weights
+weights = (np.ones(portfolioSize)) / portfolioSize
+
+# Number of portfolio tests
+numTests = 25000
+
+# Get Adj. Close data for the past 5 years via yahoo
+data = web.DataReader(stocks, data_source='yahoo')['Adj Close']
+
+# Plotting the Stock chart
+# Reminder! Figure out what the args are for plt.plot() and edit
+plt.figure(figsize=(10, 5))
+for i in data:
+    plt.plot(data.index, data[i], lw=3, alpha=0.8, label=i)
+plt.legend(loc='upper left', fontsize=12)
+plt.ylabel("Price($)")
+plt.xlabel("Years")
+plt.show()
+
+# Get % Change and Plot
+returns = data.pct_change()
+plt.figure(figsize=(10, 5))
+for x in returns:
+    plt.plot(returns.index, returns[x], lw=3, alpha=0.8, label=x)
+plt.legend(loc='upper left', fontsize=12)
+plt.ylabel('Daily Returns(%)')
+plt.xlabel("Years")
+plt.show()
+
+# Calculate mean daily return and covariance of daily return
+meanDailyReturn = returns.mean()
+covMatrix = returns.cov()
+
+# Set up array to hold results
+results = np.zeros((4 + len(stocks)-1, numTests))
+
+for i in range(numTests):
+    # Select random weights for portfolio holdings
+    weights = np.random.random(portfolioSize)
+    # Rebalance weights to sum to 1
+    weights /= np.sum(weights)
+
+    portfolioReturn = np.sum(meanDailyReturn * weights) * 252
+    portfolioStDev = np.sqrt(np.dot(weights.T, np.dot(covMatrix, weights))) * np.sqrt(252)
+
+    # Store portfolio returns and standard deviation
+    results[0, i] = portfolioReturn
+    results[1, i] = portfolioStDev
+
+    # Store portfolio sharpe ratio = (potential returns - risk free rate) / standard deviation
+    results[2, i] = (results[0, i] - riskFreeRate) / results[1, i]
+
+    # Iterate through the weight vector and add data to results array
+    for j in range(len(weights)):
+        results[j+3, i] = weights[j]
+
+# Convert results array to Pandas DataFrame
+# Column Naming
+constants = ['Returns', 'StDev', 'Sharpe']
+allColNames = constants + stocks
+resultsFrame = pd.DataFrame(results.T, columns=allColNames)
+
+# Locate position of portfolio with highest Sharpe ratio and lowest volatility
+maxSharpePort = resultsFrame.iloc[resultsFrame['Sharpe'].idxmax()]
+minVarPort = resultsFrame.iloc[resultsFrame['StDev'].idxmin()]
+
+# Create scatter plot coloured by Sharpe Ratio
+plt.scatter(resultsFrame.StDev, resultsFrame.Returns, c=resultsFrame.Sharpe, cmap='RdYlBu')
+plt.colorbar()
+plt.xlabel("Volatility")
+plt.ylabel("Return")
+
+# Mark the Max Sharpe Ratio portfolio and lowest volatility portfolio
+plt.scatter(maxSharpePort[1], maxSharpePort[0], marker=(5, 1, 0), color='r', s=500)
+plt.scatter(minVarPort[1], minVarPort[0], marker=(5, 1, 0), color='g', s=500)
+plt.show()
+
+
+print("\n")
+print("The portfolio with the highest Sharpe ratio is: ")
+maxSharpePort[3:] = maxSharpePort[3:] * 100
+print(maxSharpePort.round(2))
+print("\n")
+print("The portfolio with the lowest volatility is: ")
+minVarPort[3:] = minVarPort[3:] * 100
+print(minVarPort.round(2))
